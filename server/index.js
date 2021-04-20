@@ -3,8 +3,8 @@ const fs = require('fs');
 const path = require('path')
 const { getCoinList, getQuotes } = require('./coinmarket')
 
-const QUOTES_FOLDER = path.join(__dirname, 'data', 'quotes')
-const DATA_FOLDER = path.join(__dirname, 'data')
+const QUOTES_FOLDER = path.join(__dirname, '..', 'data', 'quotes')
+const DATA_FOLDER = path.join(__dirname, '..', 'data')
 
 async function isWritable(p) {
 	return new Promise(resolve => {
