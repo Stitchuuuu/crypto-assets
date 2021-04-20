@@ -1,7 +1,13 @@
 root = true
 
-[*]
+[*.js, *.html, *.css, *.vue, *.json]
 indent_style = tab
+indent_size = 2
+end_of_line = lf
+charset = utf-8
+
+[*.yaml]
+indent_style = space
 indent_size = 2
 end_of_line = lf
 charset = utf-8

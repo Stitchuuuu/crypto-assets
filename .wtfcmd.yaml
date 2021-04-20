@@ -1,0 +1,8 @@
+- name: dev
+  desc: Start the HTTP server for client
+  cmd: http-server --cors
+
+- name: server
+  desc: Start the server
+  cmd: AUTO_UPDATE=10 SYMBOLS=BAT,WAIF,DOGE,DOT,MANA,SC,BTC,XLM node index.js
+  cwd: ./server
