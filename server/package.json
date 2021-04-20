@@ -1,0 +1,23 @@
+{
+  "name": "crypto-assets",
+  "version": "1.0.0",
+  "description": "Crypto assets web page allowing users to track their crypto amounts",
+  "main": "server.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node server.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Stitchuuuu/crypto-assets.git"
+  },
+  "author": "Stitchu",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Stitchuuuu/crypto-assets/issues"
+  },
+  "homepage": "https://github.com/Stitchuuuu/crypto-assets#readme",
+  "dependencies": {
+    "axios": "^0.21.1"
+  }
+}

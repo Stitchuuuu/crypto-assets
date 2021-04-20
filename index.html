@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<script src="https://unpkg.com/vue@next"></script>
+	<script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+	<style>
+		[v-cloak] { display: none; }
+		body, #app, button, input[type=button], input[type=submit] {
+			font-family: Avenir, Helvetica, Arial, sans-serif;
+			-webkit-font-smoothing: antialiased;
+			-moz-osx-font-smoothing: grayscale;
+			background-color: #091044;
+			color: #F6AC5E;
+		}
+		div, span, button, a, p, h1, h2, h3, h4, h5 {
+			box-sizing: border-box;
+		}
+		a {
+			color: #F6AC5E;
+		}
+		svg {
+			fill: #F6AC5E;
+		}
+		button {
+			outline: 0;
+			border: 0;
+			padding: 0.2em 0.5em;
+			background-color: #F6AC5E;
+			color: #091044;
+		}
+		body {
+			margin: 0;
+			padding: 0;
+		}
+	</style>
+	<style>
+		#app {
+			height: 100vh;
+			width: 100vw;
+			padding: 20px;
+		}
+		.menu {
+			margin-bottom: 30px;
+			font-size: 1.5em;
+		}
+		.menu a {
+			margin-right: 20px;
+			text-decoration: none;
+			border-bottom: 2px solid rgba(246, 172, 94, 0);
+			transition: border-bottom-color 0.4s;
+		}
+		.menu a.active, .menu a:hover {
+			border-bottom: 2px solid rgba(246, 172, 94, 1);
+		}
+		@media only screen and (max-width: 600px) {
+			.menu {
+				width: 100%;
+				overflow-x: auto;
+				overflow-y: hidden;
+				padding-bottom: 20px;
+			}
+		}
+	</style>
+	<style>
+		.all-invests {
+			display: flex;
+			flex-direction: column;
+			width: 640px;
+		}
+		.all-invests > div {
+			display: flex;
+		}
+		.all-invests > div > div {
+			margin-right: 10px;
+			width: calc(100%/5);
+			padding: 10px 10px;
+		}
+		.all-invests > div:nth-child(even) {
+			background-color: rgba(255, 255, 255, 0.2);
+		}
+		.all-invests > div:nth-child(odd) {
+			background-color: rgba(255, 255, 255, 0.1);
+		}
+		.all-invests > div > div:nth-child(1) {
+			flex: 1;
+			width: auto;
+		}
+		.all-invests > div > div:nth-child(2),
+		.all-invests > div > div:nth-child(3),
+		.all-invests > div > div:nth-child(4),
+		.all-invests > div > div:nth-child(5) {
+			width: 100px;
+		}
+		.header {
+			font-weight: bold;
+		}
+		.all-invests_total {
+			margin-top: 20px;
+			font-weight: bold;
+		}
+		button {
+			font-size: 1.5em;
+			transition: background-color 0.3s;
+			margin-left: 2px;
+			margin-right: 2px;
+		}
+		button:hover {
+			background-color:rgba(246, 172, 94, 0.8);
+			cursor: pointer;
+		}
+		@media only screen and (max-width: 600px) {
+			.all-invests {
+				overflow-y: auto;
+			}
+			.content {
+				overflow-y: auto;
+			}
+		}
+	</style>
+</head>
+<body>
+	<div id="app" v-cloak>
+		<div class="menu">
+			<a href="#" :class="{'active': menuActive === 'main'}" @click="menuActive = 'main'">Résumé</a>
+			<a href="#" :class="{'active': menuActive === 'invest'}" @click="menuActive = 'invest'">Investissement</a>
+			<a href="#" :class="{'active': menuActive === 'settings'}" @click="menuActive = 'settings'">Paramètres</a>
+			<a href="#" :class="{'active': menuActive === 'sync'}" @click="menuActive = 'sync'">Synchronisation</a>
+		</div>
+		<div class="content" :class="menuActive">
+			<template v-if="menuActive === 'main'">
+				<div class="all-invests">
+					<div class="header">
+						<div>Crypto</div>
+						<div>Montant</div>
+						<div>Montant €</div>
+						<div>Gain</div>
+						<div>Gain %</div>
+					</div>
+					<div v-for="invest in allInvestsBySymbol" :key="invest.symbol">
+						<div>{{ getName(invest) }}</div>
+						<div>{{ invest.value < 0.01 ? Number(invest.value).toFixed(5) : Number(invest.value).toFixed(2) }}</div>
+						<div>{{ Number(getValueInCurrency(invest)).toFixed(2) }} €</div>
+						<div>{{ Number(getProfit(invest)).toFixed(2) }} €</div>
+						<div>{{ invest.amount === 0 ? '' : Number(getProfitPercent(invest) * 100).toFixed(2) + '%' }}</div>
+					</div>
+					<div class="all-invests_total">
+						<div>Total</div>
+						<div>{{ Number(totalAmountInvests).toFixed(2) }} €</div>
+						<div>{{ Number(totalValueInvests).toFixed(2) }} €</div>
+						<div>{{ Number(totalProfit).toFixed(2) }} €</div>
+						<div>{{ Number(totalProfitPercent * 100).toFixed(2) }} %</div>
+					</div>
+				</div>
+			</template>
+			<template v-else-if="menuActive === 'sync'">
+				<div>
+					<button @click="exportData('clipboard')">Exporter (presse-papier)</button>
+					<span v-if="exportMessage">{{ exportMessage }}</span>
+				</div>
+				<div>
+					<button @click="importData('clipboard')">Importer (presse-papier)</button>
+					<span v-if="importMessage">{{ importMessage }}</span>
+				</div>
+			</template>
+		</div>
+	</div>
+	<script>
+	const axios = window.axios
+	let app
+	const $app = Vue.createApp({
+		data: () => ({
+			menuActive: 'main',
+			invests: [],
+			symbols: {},
+			quotes: {},
+			timeoutRefreshQuotes: -1,
+			importMessage: '',
+			exportMessage: '',
+		}),
+		computed: {
+			totalAmountInvests() {
+				return this.invests.reduce((v, invest) => v + (invest.amount || 0), 0)
+			},
+			totalValueInvests() {
+				return this.allInvestsBySymbol.reduce((v, invest) => v + this.getValueInCurrency(invest), 0)
+			},
+			totalProfit() {
+				return this.totalValueInvests - this.totalAmountInvests
+			},
+			totalProfitPercent() {
+				return this.totalProfit / this.totalValueInvests
+			},
+			allInvestsBySymbol() {
+				const bySymbols = {}
+				const symbols = this.symbols
+				for (const invest of this.invests) {
+					if (!bySymbols[invest.symbol]) bySymbols[invest.symbol] = { 
+						amount: 0, 
+						value: 0, 
+						symbol: invest.symbol,
+					}
+					bySymbols[invest.symbol].amount += invest.amount || 0
+					bySymbols[invest.symbol].value += invest.value || 0
+				}
+				return Object.values(bySymbols)
+			},
+		},
+		methods: {
+			exportData(type) {
+				if (type === 'clipboard') {
+					const data = JSON.stringify({
+						invests: this.invests,
+					})
+					navigator.clipboard.writeText(data)
+					this.exportMessage = 'Exporté !'
+					setTimeout(() => {
+						this.exportMessage = ''
+					}, 2000)
+				}
+			},
+			async importData(type) {
+				if (type === 'clipboard') {
+					const data = await navigator.clipboard.readText()
+					let valid = false
+					try {
+						const saveData = JSON.parse(data)
+						if (saveData.invests && Array.isArray(saveData.invests)) {
+							this.invests.splice(0)
+							for (const invest of saveData.invests) {
+								this.invests.push(invest)
+							}
+							valid = true
+							this.saveInvests()
+						}
+					} catch (err) {
+						console.error(err)
+					}
+					this.importMessage = valid ? 'Données importées !' : 'Données invalide dans le presse-papier.'
+					setTimeout(() => {
+						this.importMessage = ''
+					}, 2000)
+				}
+			},
+			invest(invest = {}) {
+				if (!invest.symbol) throw new Error('You must precise a symbol')
+				if (!invest.value) throw new Error('You must precise a value')
+				this.invests.push(invest)
+				this.saveInvests()
+			},
+			revertInvest() {
+				this.invests.pop()
+				this.saveInvests()
+			},
+			clearInvest(symbol) {
+				let founded = true
+				while (founded) {
+					const index = this.invests.findIndex(o => o.symbol === symbol)
+					if (index === -1) founded = false
+					else this.invests.splice(index, 1)
+				}
+				this.saveInvests()
+			},
+			getName(invest) {
+				return this.symbols[invest.symbol] ? (this.symbols[invest.symbol].name || invest.symbol ) : invest.symbol
+			},
+			getValueInCurrency(invest) {
+				if (!this.quotes[invest.symbol]) return ''
+				return this.quotes[invest.symbol].value * invest.value
+			},
+			getProfit(invest) {
+				if (!this.quotes[invest.symbol]) return ''
+				return (this.quotes[invest.symbol].value * invest.value) - invest.amount
+			},
+			getProfitPercent(invest) {
+				if (!this.quotes[invest.symbol] || invest.amount === 0) return 0
+				return this.getProfit(invest) / invest.amount
+			},
+			saveInvests() {
+				window.localStorage.setItem('invests', JSON.stringify(this.invests))
+			},
+			saveQuotes() {
+				window.localStorage.setItem('quotes', JSON.stringify(this.quotes))
+			},
+			async updateQuotes() {
+				for (const invest of this.allInvestsBySymbol) {
+					try {
+						const quoteData = await axios.get(`/data/quotes/${invest.symbol}.json`, { params: { _t: Date.now() }}).then(response => response.data)
+						if (!this.quotes[invest.symbol]) {
+							this.quotes[invest.symbol] = quoteData
+						} else {
+							this.quotes[invest.symbol].value = quoteData.value
+						}
+					} catch(err) {
+						console.error(err)
+					}
+				}
+				this.saveQuotes()
+			},
+			intervalUpdateQuotes() {
+				clearTimeout(this.timeoutRefreshQuotes)
+				this.timeoutRefreshQuotes = setTimeout(async() => {
+					this.timeoutRefreshQuotes = -1
+					await this.updateQuotes()
+					this.intervalUpdateQuotes()
+				}, 60000)
+			}
+		},
+		mounted() {
+			app = this
+			const promises = []
+			const lastQuotes = window.localStorage.getItem('quotes')
+			const cryptoList = window.localStorage.getItem('symbols')
+			if (lastQuotes) {
+				const data = JSON.parse(lastQuotes)
+				for (const symbol of Object.keys(data)) {
+					this.quotes[symbol] = data[symbol]
+				}
+				this.$nextTick(() => this.updateQuotes())
+			} else {
+				axios.get('/data/quotes/__all.json').then(response => response.data).then(data => data.data).then(list => {
+					for (const q of list) {
+						this.quotes[q.symbol] = q
+					}
+					window.localStorage.setItem('quotes', JSON.stringify(this.quotes))
+				})
+			}
+			if (cryptoList) {
+				const data = JSON.parse(cryptoList)
+				for (const symbol of Object.keys(data)) {
+					this.symbols[symbol] = data[symbol]
+				}
+			} else {
+				axios.get('/data/crypto-list.json').then(response => response.data).then(data => data.data).then(list => {
+					for (const q of list) {
+						this.symbols[q.symbol] = q
+					}
+					window.localStorage.setItem('symbols', JSON.stringify(this.symbols))
+				})
+			}
+
+			const invests = window.localStorage.getItem('invests')
+			if (invests) {
+				const data = JSON.parse(invests)
+				for (const o of data) this.invests.push(o)
+			}
+			this.intervalUpdateQuotes()
+		}
+	}).mount('#app')
+	</script>
+</html>
