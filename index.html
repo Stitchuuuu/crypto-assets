@@ -54,6 +54,9 @@
 		.menu a.active, .menu a:hover {
 			border-bottom: 2px solid rgba(246, 172, 94, 1);
 		}
+		.content {
+			padding-bottom: 30px;
+		}
 		@media only screen and (max-width: 600px) {
 			.menu {
 				width: 100%;
@@ -92,6 +95,9 @@
 		.all-invests > div > div:nth-child(4),
 		.all-invests > div > div:nth-child(5) {
 			width: 100px;
+		}
+		.all-invests .small {
+			font-size: 0.7em;
 		}
 		.header {
 			font-weight: bold;
@@ -139,8 +145,14 @@
 						<div>Gain %</div>
 					</div>
 					<div v-for="invest in allInvestsBySymbol" :key="invest.symbol">
-						<div>{{ getName(invest) }}</div>
-						<div>{{ invest.value < 0.01 ? Number(invest.value).toFixed(5) : Number(invest.value).toFixed(2) }}</div>
+						<div>
+							<div>{{ getName(invest) }}</div>
+							<div class="small">{{ getQuoteLastUpdateDate(invest) }}</div>
+						</div>
+						<div>
+							<div>{{ invest.value < 0.01 ? Number(invest.value).toFixed(5) : Number(invest.value).toFixed(2) }}</div>
+							<div class="small">@ {{ getQuoteValue(invest) }} €</div>
+						</div>
 						<div>{{ Number(getValueInCurrency(invest)).toFixed(2) }} €</div>
 						<div>{{ Number(getProfit(invest)).toFixed(2) }} €</div>
 						<div>{{ invest.amount === 0 ? '' : Number(getProfitPercent(invest) * 100).toFixed(2) + '%' }}</div>
@@ -277,6 +289,14 @@
 				if (!this.quotes[invest.symbol] || invest.amount === 0) return 0
 				return this.getProfit(invest) / invest.amount
 			},
+			getQuoteLastUpdateDate(invest) {
+				const dt = new Date(this.quotes[invest.symbol].updatedAt)
+				return dt.toLocaleDateString() + ' à ' + dt.toLocaleTimeString()
+			},
+			getQuoteValue(invest) {
+				const value = this.quotes[invest.symbol].value
+				return value < 100 ? Number(value).toFixed(5) : Number(value).toFixed(2)
+			},
 			saveInvests() {
 				window.localStorage.setItem('invests', JSON.stringify(this.invests))
 			},
@@ -291,6 +311,7 @@
 							this.quotes[invest.symbol] = quoteData
 						} else {
 							this.quotes[invest.symbol].value = quoteData.value
+							this.quotes[invest.symbol].updatedAt = quoteData.updatedAt
 						}
 					} catch(err) {
 						console.error(err)
