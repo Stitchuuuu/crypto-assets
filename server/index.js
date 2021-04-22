@@ -5,7 +5,7 @@ const { getCoinList, getQuotes } = require('./coinmarket')
 
 const QUOTES_FOLDER = path.join(__dirname, '..', 'data', 'quotes')
 const DATA_FOLDER = path.join(__dirname, '..', 'data')
-const most200PopularCoinsSymbol = []
+let most200PopularCoinsSymbol = []
 async function isWritable(p) {
 	return new Promise(resolve => {
 		fs.access(p, fs.constants.W_OK, (err) => {
@@ -16,7 +16,7 @@ async function isWritable(p) {
 
 async function updateCurrencies() {
 	let quotes = process.env.SYMBOLS ? process.env.SYMBOLS.split(',') : []
-	quotes = [...quotes, ...most200PopularCoinsSymbol.filter(s => !~quotes.indexOf(s)).slice(0, 100 - quotes.length)]
+	quotes = [...quotes, ...most200PopularCoinsSymbol.filter(s => !~quotes.indexOf(s)).slice(0, 100 - quotes.length)].filter(s => !!s)
 	const data = await getQuotes({ symbols: quotes })
 	for (const [symbol, item] of Object.entries(data.quotes)) {
 		fs.writeFileSync(path.join(QUOTES_FOLDER, `${symbol}.json`), JSON.stringify(item))
@@ -26,7 +26,7 @@ async function updateCurrencies() {
 }
 async function updateCoinList() {
 	const data = await getCoinList()
-	most200PopularCoinsSymbol.splice(0)
+	most200PopularCoinsSymbol = []
 	Object.values(data.$data).sort((a, b) => {
 		if (a.rank < b.rank) return -1
 		else if (a.rank > b.rank) return 1
@@ -34,6 +34,7 @@ async function updateCoinList() {
 	}).slice(0, 200).forEach((c) => {
 		most200PopularCoinsSymbol.push(c.symbol)
 	})
+	most200PopularCoinsSymbol = most200PopularCoinsSymbol.filter(s => !!s)
 	
 	fs.writeFileSync(path.join(DATA_FOLDER, 'crypto-list.full.json'), JSON.stringify({ data: data.$data, updatedAt: new Date() }))
 	fs.writeFileSync(path.join(DATA_FOLDER, 'crypto-list.json'), JSON.stringify({ data: data.list, updatedAt: new Date() }))
