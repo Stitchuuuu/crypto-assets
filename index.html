@@ -297,11 +297,11 @@
 				return this.getProfit(invest) / invest.amount
 			},
 			getQuoteLastUpdateDate(invest) {
-				const dt = new Date(this.quotes[invest.symbol].updatedAt)
+				const dt = new Date(this.quotes[invest.symbol] ? this.quotes[invest.symbol].updatedAt : null)
 				return dt.toLocaleDateString() + ' à ' + dt.toLocaleTimeString()
 			},
 			getQuoteValue(invest) {
-				const value = this.quotes[invest.symbol].value
+				const value = this.quotes[invest.symbol] ? this.quotes[invest.symbol].value : 0
 				return value < 100 ? Number(value).toFixed(5) : Number(value).toFixed(2)
 			},
 			saveInvests() {
