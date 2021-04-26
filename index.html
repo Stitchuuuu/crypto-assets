@@ -12,6 +12,8 @@
 	<link rel="apple-touch-icon" sizes="167x167" href="/www/icons/touch-icon-ipad-167x167.png">
 	<script src="https://unpkg.com/vue@next"></script>
 	<script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+	<script src="https://unpkg.com/peerjs@1.3.1/dist/peerjs.min.js"></script>
+	<script src="/utils.js"></script>
 	<style>
 		[v-cloak] { display: none; }
 		body, #app, button, input[type=button], input[type=submit] {
@@ -258,8 +260,15 @@
 				</div>
 				<div class="sync-mean">
 					<span>Clé (P2P)</span>
-					<a class="button" @click="exportData($event, 'file')">Créer clé</a>
-					<button @click="importData($event, 'file')">Copier clé</button>
+					<template v-if="!this.syncKey">
+						<button @click="generateSyncKey">Créer nouvelle clé</button>
+						<button @click="importData($event, 'synckey')">Importer clé</button>	
+					</template>
+					<template v-else>
+						<button @click="exportData($event, 'synckey')">Copier clé</button>
+						<button>Afficher clé</button>
+						<button @click="syncKey = null">Supprimer clé</button>
+					</template>
 				</div>
 			</template>
 		</div>
@@ -274,6 +283,8 @@
 	</div>
 	<script>
 	const axios = window.axios
+	let peerClient = null
+	let peerOtherClients = {}
 	let app
 	const _id = function() {
 		return Date.now().toString(36) + '-' + Math.random().toString(36)
@@ -285,7 +296,15 @@
 			symbols: {},
 			quotes: {},
 			timeoutRefreshQuotes: -1,
-			notifications: []
+			notifications: [],
+			syncKey: null,
+			peerSubclientID: 1,
+			peerClientInfo: {
+				connecting: false,
+				connected: false,
+				timeoutReconnect: -1,
+				intervalSearchKind: -1,
+			},
 		}),
 		computed: {
 			totalAmountInvests() {
@@ -314,9 +333,14 @@
 				}
 				return Object.values(bySymbols)
 			},
+			syncKeyWords() {
+				if (!this.syncKey) return ''
+				else return window.$utils.getWordsFromKey(this.syncKey)
+			},
 		},
 		methods: {
-			test() {
+			generateSyncKey() {
+				this.syncKey = window.$utils.generateRandomKey()
 			},
 			notificationLeave(el) {
 				el.style.marginTop = (-1 * el.offsetHeight - 10) + 'px'
@@ -360,6 +384,14 @@
 					})
 					e.target.setAttribute('href', URL.createObjectURL(blob))
 					e.target.setAttribute('download', 'crypto-assets-' + Date.now() + '.json')
+				} else if (type === 'synckey') {
+					const data = this.syncKey
+					try {
+						navigator.clipboard.writeText(data)
+						this.notificationPush('success', 'La clé de synchronisation a été copiée !')
+					} catch (e) {
+						this.notificationPush('error', 'Impossible de copier la clé de synchronisation.')
+					}
 				}
 			},
 			importDataFromJSON(data) {
@@ -403,6 +435,14 @@
 						this.$refs.file.click()
 					} else {
 						this.$refs.file.value = ''
+					}
+				} else if (type === 'synckey') {
+					const data = await navigator.clipboard.readText()
+					if (!/[A-Z]{24}/i.test(data)) {
+						this.notificationPush('error', 'Clé de synchronisation non valide')
+					} else {
+						// TODO: Faire une vérification client à client
+						this.syncKey = data
 					}
 				}
 			},
@@ -477,13 +517,120 @@
 					await this.updateQuotes()
 					this.intervalUpdateQuotes()
 				}, 60000)
-			}
+			},
+			peerID(subid) {
+				return 'stitchuuuu_crypto-assets_' + this.syncKey + '-' + subid
+			},
+			peerCreateClient() {
+				const tryReconnect = () => this.peerClientReconnect()
+				const peerClientInfo = this.peerClientInfo
+				peerClientInfo.connecting = true
+				peerClient = new Peer(this.peerID(this.peerSubclientID))
+				peerClient.on('error', (err) => {
+					if (err.type === 'unavailable-id') {
+						this.peerSubclientID++
+						peerClient.unavailableID = true
+						this.peerCreateClient()
+					}
+				})
+				peerClient.on('open', (id) => {
+					peerClientInfo.connecting = false
+					peerClientInfo.connected = true
+					peerClientInfo.intervalSearchKind = setInterval(() => this.peerSearchSameKind(), 30000)
+					this.peerSearchSameKind()
+				})
+				peerClient.on('disconnect', function(err) {
+					peerClientInfo.connecting = false
+					peerClientInfo.connected = false
+					clearInterval(peerClientInfo.intervalSearchKind)
+					peerClientInfo.intervalSearchKind = -1
+					peerOtherClients = {}
+					if (this.unavailableID) return
+					peerClientInfo.timeoutReconnect = setTimeout(tryReconnect, 5000)
+				})
+				peerClient.on('server-error', () => {
+					peerClientInfo.timeoutReconnect = setTimeout(tryReconnect, 5000)
+				})
+				peerClient.on('connection', (conn) => {
+					console.log('connected with (in)', conn.peer)
+					peerOtherClients[conn.peer] = conn
+					// this.peerInitConnection(conn)
+				})
+			},
+			peerClientReconnect() {
+				this.peerStatusInfo.connecting = true
+				this.peerClientInfo.timeoutReconnect = -1
+				try {
+					peerClient && peerClient.reconnect()
+				} catch (err) {
+					peerClient = this.peerCreateClient()
+					console.error(err)
+				}
+			},
+			peerInitConnection(conn) {
+				conn.on('data', (d) => {
+					console.log(d)
+				})
+			},
+			peerSearchSameKind() {
+				const allIds = []
+				for (let i = 1; i < 64; i++) {
+					if (i === this.peerSubclientID) continue
+					const id = this.peerID(i)
+					if (peerOtherClients[id]) continue
+					const connection = peerClient.connect(this.peerID(i))
+					peerOtherClients[id] = connection
+					connection.on('error', (err) => {
+						console.error('disconnected (error):', id)
+						delete peerOtherClients[id]
+					})
+					connection.on('open', () => {
+						console.log('connected with (out)', id)
+						peerOtherClients[id] = connection
+						// this.peerInitConnection(connection)
+					})
+					connection.on('error', (err) => {
+						console.error('disconnected (error):', id)
+						delete peerOtherClients[id]
+					})
+					connection.on('close', (err) => {
+						console.error('disconnected (close):', id)
+						delete peerOtherClients[id]
+					})
+					setTimeout(() => {
+						if (!connection.open) {
+							connection.close()
+							delete peerOtherClients[id]
+						}
+					}, 2000)
+				}
+			},
+		},
+		watch: {
+			syncKey(val) {
+				window.localStorage.setItem('syncKey', val)
+				if (val) {
+					if (peerClient) {
+						peerClient.disconnect()
+					}
+					this.peerCreateClient()
+				}
+			},
+		},
+		beforeUnmount() {
 		},
 		mounted() {
+			window.addEventListener('beforeunload', () => {
+				for (const conn of Object.values(peerOtherClients)) {
+					console.log('Closing', conn.peer)
+					conn.close()
+				}
+			})
 			app = this
 			const promises = []
 			const lastQuotes = window.localStorage.getItem('quotes')
 			const cryptoList = window.localStorage.getItem('symbols')
+			this.syncKey = window.localStorage.getItem('syncKey') || null
 			if (lastQuotes) {
 				const data = JSON.parse(lastQuotes)
 				for (const symbol of Object.keys(data)) {
