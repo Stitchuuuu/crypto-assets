@@ -30,12 +30,14 @@
 		svg {
 			fill: #F6AC5E;
 		}
-		button {
+		button, a.button {
 			outline: 0;
 			border: 0;
 			padding: 0.2em 0.5em;
 			background-color: #F6AC5E;
 			color: #091044;
+			cursor: pointer;
+			text-decoration: none;
 		}
 		body {
 			margin: 0;
@@ -113,13 +115,13 @@
 			margin-top: 20px;
 			font-weight: bold;
 		}
-		button {
+		button, a.button {
 			font-size: 1.5em;
 			transition: background-color 0.3s;
 			margin-left: 2px;
 			margin-right: 2px;
 		}
-		button:hover {
+		a.button:hover, button:hover {
 			background-color:rgba(246, 172, 94, 0.8);
 			cursor: pointer;
 		}
@@ -185,6 +187,22 @@
 			}
 		}
 	</style>
+	<style>
+		.sync button, .sync a.button {
+			font-size: 16px;
+		}
+		.sync button:first-child {
+			margin-left: 20px;
+		}
+		.sync-mean {
+			margin-bottom: 10px;
+			display: flex;
+			align-items: center;
+		}
+		.sync-mean span {
+			width: 120px;
+		}
+	</style>
 </head>
 <body>
 	<div id="app" v-cloak>
@@ -227,11 +245,21 @@
 				</div>
 			</template>
 			<template v-else-if="menuActive === 'sync'">
-				<div>
-					<button @click="exportData('clipboard')">Exporter (presse-papier)</button>
+				<div class="sync-mean">
+					<span>Copier/Coller</span>
+					<button @click="exportData($event, 'clipboard')">Exporter</button>
+					<button @click="importData($event, 'clipboard')">Importer</button>
 				</div>
-				<div>
-					<button @click="importData('clipboard')">Importer (presse-papier)</button>
+				<div class="sync-mean">
+					<span>Fichier</span>
+					<input type="file" ref="file" accept="application/json" @change="importData($event, 'file')" style="visibility: hidden; position: absolute; top:0; left: 0;" />
+					<a class="button" @click="exportData($event, 'file')">Exporter</a>
+					<button @click="importData($event, 'file')" @drop.prevent="importData($event, 'file')" @dragover.prevent.stop="$event.dataTransfer.dropEffect = 'copy'">Importer</button>
+				</div>
+				<div class="sync-mean">
+					<span>Clé (P2P)</span>
+					<a class="button" @click="exportData($event, 'file')">Créer clé</a>
+					<button @click="importData($event, 'file')">Copier clé</button>
 				</div>
 			</template>
 		</div>
@@ -252,12 +280,12 @@
 	}
 	const $app = Vue.createApp({
 		data: () => ({
-			menuActive: 'main',
+			menuActive: 'sync',
 			invests: [],
 			symbols: {},
 			quotes: {},
 			timeoutRefreshQuotes: -1,
-			notifications: [{ type: 'success', text: 'hello world', id: 1 }]
+			notifications: []
 		}),
 		computed: {
 			totalAmountInvests() {
@@ -288,6 +316,8 @@
 			},
 		},
 		methods: {
+			test() {
+			},
 			notificationLeave(el) {
 				el.style.marginTop = (-1 * el.offsetHeight - 10) + 'px'
 			},
@@ -310,7 +340,7 @@
 					}, timeout)
 				}
 			},
-			exportData(type) {
+			exportData(e, type) {
 				if (type === 'clipboard') {
 					const data = JSON.stringify({
 						invests: this.invests,
@@ -321,29 +351,58 @@
 					} catch (e) {
 						this.notificationPush('error', `Impossible d'exporter les données dans le presse-papier.`)
 					}
+				} else if (type === 'file' && window.Blob && window.URL) {
+					const data = JSON.stringify({
+						invests: this.invests,
+					})
+					const blob = new Blob([data], {
+						type: 'application/json;charset=utf-8',
+					})
+					e.target.setAttribute('href', URL.createObjectURL(blob))
+					e.target.setAttribute('download', 'crypto-assets-' + Date.now() + '.json')
 				}
 			},
-			async importData(type) {
+			importDataFromJSON(data) {
+				let valid = false
+				try {
+					const saveData = JSON.parse(data)
+					if (saveData.invests && Array.isArray(saveData.invests)) {
+						this.invests.splice(0)
+						for (const invest of saveData.invests) {
+							this.invests.push(invest)
+						}
+						valid = true
+						this.saveInvests()
+					}
+				} catch (err) {
+					console.error(err)
+				}
+				if (valid) {						
+					this.notificationPush('success', 'Données importées !')
+				} else {
+					this.notificationPush('error', 'Données invalide dans le presse-papier.')
+				}
+			},
+			async importData(e, type) {
 				if (type === 'clipboard') {
 					const data = await navigator.clipboard.readText()
-					let valid = false
-					try {
-						const saveData = JSON.parse(data)
-						if (saveData.invests && Array.isArray(saveData.invests)) {
-							this.invests.splice(0)
-							for (const invest of saveData.invests) {
-								this.invests.push(invest)
-							}
-							valid = true
-							this.saveInvests()
-						}
-					} catch (err) {
-						console.error(err)
-					}
-					if (valid) {						
-						this.notificationPush('success', 'Données importées !')
+					this.importDataFromJSON(data)
+				} else if (type === 'file') {
+					if (
+						(event.target.files && event.target.files.length) ||
+						(event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files)
+						) {
+						const file = event.target.files ? event.target.files[0] : event.dataTransfer.files[0]
+						const reader = new FileReader()
+						reader.addEventListener('load', (event) => {
+							const data = event.target.result
+							this.importDataFromJSON(data)
+						})
+						reader.readAsText(file)
+					} else if (event.target !== this.$refs.file) {
+						this.$refs.file.click()
 					} else {
-						this.notificationPush('error', 'Données invalide dans le presse-papier.')
+						this.$refs.file.value = ''
 					}
 				}
 			},
