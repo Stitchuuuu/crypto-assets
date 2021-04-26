@@ -132,6 +132,59 @@
 			}
 		}
 	</style>
+	<style>
+		.notifications {
+			position: fixed;
+			z-index: 1000;
+			top: 0;
+			right: 0;
+			padding-top: 20px;
+			padding-right: 20px;
+		}
+		.notification {
+			padding: 10px;
+			padding-right: 40px;
+			width: 400px;
+			text-align: left;
+			position: relative;
+			margin-bottom: 10px;
+			margin-top: 0;
+		}
+		.notification-close {
+			right: 0;
+			padding: 10px;
+			top: 0;
+			cursor: pointer;
+			position: absolute;
+		}
+		.notification--success {
+			background-color: #3F910C;
+			color: #091044;
+		}
+		.notification--error {
+			background-color: #451E10;
+			color: white;
+		}
+		.notification-enter-active, .notification-leave-active {
+			transition: all 0.5s;
+		}
+		.notification-enter-from, .notification-leave-to {
+			opacity: 0;
+		}
+		.notification-enter-from {
+			transform: translateY(-30px);
+		}
+		@media only screen and (max-width: 600px) {
+			.notifications {
+				left: 0;
+				top: 0;
+				padding: 20px;
+			}
+			.notification {
+				width: auto;
+			}
+		}
+	</style>
 </head>
 <body>
 	<div id="app" v-cloak>
@@ -176,18 +229,27 @@
 			<template v-else-if="menuActive === 'sync'">
 				<div>
 					<button @click="exportData('clipboard')">Exporter (presse-papier)</button>
-					<span v-if="exportMessage">{{ exportMessage }}</span>
 				</div>
 				<div>
 					<button @click="importData('clipboard')">Importer (presse-papier)</button>
-					<span v-if="importMessage">{{ importMessage }}</span>
 				</div>
 			</template>
+		</div>
+		<div class="notifications">
+			<transition-group name="notification" @leave="notificationLeave">
+				<div v-for="notification in notifications" :key="notification.id" :class="'notification notification--' + notification.type">
+					{{ notification.text }}
+					<span class="notification-close" @click="notificationClose(notification)">✕</span>
+				</div>
+			</transition-group>
 		</div>
 	</div>
 	<script>
 	const axios = window.axios
 	let app
+	const _id = function() {
+		return Date.now().toString(36) + '-' + Math.random().toString(36)
+	}
 	const $app = Vue.createApp({
 		data: () => ({
 			menuActive: 'main',
@@ -195,8 +257,7 @@
 			symbols: {},
 			quotes: {},
 			timeoutRefreshQuotes: -1,
-			importMessage: '',
-			exportMessage: '',
+			notifications: [{ type: 'success', text: 'hello world', id: 1 }]
 		}),
 		computed: {
 			totalAmountInvests() {
@@ -227,16 +288,39 @@
 			},
 		},
 		methods: {
+			notificationLeave(el) {
+				el.style.marginTop = (-1 * el.offsetHeight - 10) + 'px'
+			},
+			notificationClose(n) {
+				const index = this.notifications.findIndex(notif => notif.id === n.id)
+				if (index >= 0) {
+					this.notifications.splice(index, 1)
+				}
+			},
+			notificationPush(type, text, timeout = 5000) {
+				const n = {
+					type,
+					text,
+					id: _id(),
+				}
+				this.notifications.push(n)
+				if (timeout) {
+					setTimeout(() => {
+						this.notificationClose(n)
+					}, timeout)
+				}
+			},
 			exportData(type) {
 				if (type === 'clipboard') {
 					const data = JSON.stringify({
 						invests: this.invests,
 					})
-					navigator.clipboard.writeText(data)
-					this.exportMessage = 'Exporté !'
-					setTimeout(() => {
-						this.exportMessage = ''
-					}, 2000)
+					try {
+						navigator.clipboard.writeText(data)
+						this.notificationPush('success', 'Données exportées !')
+					} catch (e) {
+						this.notificationPush('error', `Impossible d'exporter les données dans le presse-papier.`)
+					}
 				}
 			},
 			async importData(type) {
@@ -256,10 +340,11 @@
 					} catch (err) {
 						console.error(err)
 					}
-					this.importMessage = valid ? 'Données importées !' : 'Données invalide dans le presse-papier.'
-					setTimeout(() => {
-						this.importMessage = ''
-					}, 2000)
+					if (valid) {						
+						this.notificationPush('success', 'Données importées !')
+					} else {
+						this.notificationPush('error', 'Données invalide dans le presse-papier.')
+					}
 				}
 			},
 			invest(invest = {}) {
