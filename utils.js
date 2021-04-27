@@ -16,6 +16,16 @@
 				words.push(alphabet[index])
 			}
 			return words
+		},
+		id() {
+			return Date.now().toString(36) + '-' + Math.random().toString(36)
+		}
+	}
+	if (typeof window.queueMicrotask !== "function") {
+		window.queueMicrotask = function (callback) {
+			Promise.resolve()
+			.then(callback)
+			.catch(e => setTimeout(() => { throw e; }))
 		}
 	}
 })()
