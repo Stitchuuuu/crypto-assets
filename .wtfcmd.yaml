@@ -4,5 +4,9 @@
 
 - name: server
   desc: Start the server
-  cmd: AUTO_UPDATE=10 SYMBOLS=BAT,WAIF,DOGE,DOT,MANA,SC,BTC,XLM node index.js
+  cmd: AUTO_UPDATE=10 SYMBOLS=BAT,WAIF,DOGE,DOT,MANA,SC,BTC,XLM,BNB,UBQ node index.js
   cwd: ./server
+
+- name: ngrok
+  desc: Start an ngrok instance to test on mobile (with secure layer)
+  cmd: ngrok http http://127.0.0.1:8080
