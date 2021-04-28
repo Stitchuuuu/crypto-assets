@@ -14,7 +14,7 @@
 	<script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
 	<script>
 	</script>
-	<script src="https://unpkg.com/peerjs@1.3.1/dist/peerjs.min.js"></script>
+	<script src="/peerjs.js"></script>
 	<script src="/utils.js"></script>
 	<style>
 		[v-cloak] { display: none; }
@@ -195,8 +195,8 @@
 		.sync button, .sync a.button {
 			font-size: 16px;
 		}
-		.sync button:first-child {
-			margin-left: 20px;
+		.sync-mean span {
+			margin-right: 20px;
 		}
 		.sync-mean {
 			margin-bottom: 10px;
@@ -206,6 +206,23 @@
 		.sync-mean span {
 			width: 120px;
 		}
+		@media only screen and (max-width: 600px) {
+			.sync-mean {
+				flex-direction: column;
+			}
+			.sync-mean span {
+				display: block;
+				width: 100%;
+				margin-right: 0;
+			}
+			.sync-mean button, .sync-mean a {
+				display: block;
+				width: 100%;
+				text-align: center;
+				margin-top: 10px;
+			}
+		}
+
 	</style>
 </head>
 <body>
@@ -249,6 +266,17 @@
 				</div>
 			</template>
 			<template v-else-if="menuActive === 'sync'">
+				<div class="sync-mean" style="margin-bottom: 30px">
+					<template v-if="!this.syncKey">
+						<button @click="generateSyncKey">Créer nouvelle clé</button>
+						<button @click="importData($event, 'synckey')">Importer clé</button>	
+					</template>
+					<template v-else>
+						<button>Afficher clé</button>
+						<button>Synchroniser</button>
+						<button @click="syncKey = null">Supprimer clé</button>
+					</template>
+				</div>
 				<div class="sync-mean">
 					<span>Copier/Coller</span>
 					<button @click="exportData($event, 'clipboard')">Exporter</button>
@@ -259,18 +287,6 @@
 					<input type="file" ref="file" accept="application/json" @change="importData($event, 'file')" style="visibility: hidden; position: absolute; top:0; left: 0;" />
 					<a class="button" @click="exportData($event, 'file')">Exporter</a>
 					<button @click="importData($event, 'file')" @drop.prevent="importData($event, 'file')" @dragover.prevent.stop="$event.dataTransfer.dropEffect = 'copy'">Importer</button>
-				</div>
-				<div class="sync-mean">
-					<span>Clé (P2P)</span>
-					<template v-if="!this.syncKey">
-						<button @click="generateSyncKey">Créer nouvelle clé</button>
-						<button @click="importData($event, 'synckey')">Importer clé</button>	
-					</template>
-					<template v-else>
-						<button @click="exportData($event, 'synckey')">Copier clé</button>
-						<button>Afficher clé</button>
-						<button @click="syncKey = null">Supprimer clé</button>
-					</template>
 				</div>
 			</template>
 		</div>
@@ -287,6 +303,7 @@
 	const axios = window.axios
 	let peerClient = null
 	let peerOtherClients = {}
+	let peerOtherClientsPong = {}
 	const connections = []
 	let app
 	const _id = function() {
@@ -302,11 +319,9 @@
 			notifications: [],
 			syncKey: null,
 			peerSubclientID: 1,
-			peerClientInfo: {
+			peerClient: {
+				reconnectDelay: 0,
 				connecting: false,
-				connected: false,
-				timeoutReconnect: -1,
-				intervalSearchKind: -1,
 			},
 		}),
 		computed: {
@@ -544,20 +559,27 @@
 				}, 60000)
 			},
 			peerID(subid) {
-				return 'stitchuuuu_crypto-assets_' + this.syncKey + '-' + subid
+				return 'stitchuuuu_crypto-assets-tmp-local_' + this.syncKey + '-' + subid
 			},
-			peerMessage(o) {
+			peerMessage(o, conn) {
+				console.log('message?', o)
 				if (typeof o !== 'object') return
 				if (!o.action) return
-
+				if (o.action === 'ping') {
+					console.log('ping?')
+					conn.send({ action: 'pong' })
+					return
+				} else if (o.action === 'pong') {
+					peerOtherClientsPong[conn.peer] = true
+				}
 				if (o.action === 'sync:invest') {
 					console.debug('receiving sync:invest', o)
 
 					if (!o.type && Array.isArray(o.value)) {
 						// We compare all values in invest, we add deleted, or we add them
 						for (const invest of o.value) {
-							const index = this.invests.findIndex(e => e.id === o.value.id)
-							// We don't add deleted
+							const index = this.invests.findIndex(e => e.id === invest.id)
+							console.log('index of', invest.id, 'with', this.invests, index, invest)
 							if (index < 0) this.invests.push(invest)
 							else {
 								const mineInvest = this.invests[index]
@@ -586,125 +608,213 @@
 					}
 				}
 			},
-			peerCreateClient() {
-				const tryReconnect = () => this.peerClientReconnect()
-				const peerClientInfo = this.peerClientInfo
-				peerClientInfo.connecting = true
+			peerReconnect() {
+				if (!this.syncKey) return
+				if (this.peerClient.connecting) return
+				let delay = 0
+				switch (this.peerClient.reconnectDelay) {
+					case 0:
+						delay = 2000
+						break
+					case 2000:
+						delay = 5000
+						break
+					case 5000:
+						delay = 10000
+						break
+				}
+				setTimeout(() => {
+					this.peer()
+					this.peerClient.reconnectDelay = delay
+				}, this.peerClient.reconnectDelay)
+			},
+
+			peerIsAlive(conn) {
+				return new Promise(resolve => {
+					if (!conn.open) return resolve(false)
+					try {
+						let timeout = -1
+						const listener = (d) => {
+							if (typeof d === 'object' && d.action === 'pong') {
+								clearTimeout(timeout)
+								conn.off('data', listener)
+								resolve(true)
+							}
+						}
+						conn.on('data', listener)
+						timeout = setTimeout(() => {
+							conn.off(listener)
+							resolve(false)
+						}, 500)
+					} catch (err) {
+						console.error(err)
+						resolve(false)
+					}
+				})
+			},
+			peer() {
+				if (this.peerClient.connecting) return
+				if (!this.syncKey) return
+
+				this.peerClient.connecting = true
+				if (peerClient && !peerClient.disconnected) {
+					peerClient.disconnect()
+				}
 				peerClient = new Peer(this.peerID(this.peerSubclientID))
 				peerClient.on('error', (err, two) => {
 					if (err.type === 'unavailable-id') {
-						this.peerSubclientID++
-						peerClient.unavailableID = true
-						this.peerCreateClient()
+						this.peerSubclientID = (this.peerSubclientID+1) % 16
+						this.peerClient.reconnectDelay = 0
+						this.peer()
 					} else if (err.type === 'peer-unavailable') {
 						const [, peerID] = /Could not connect to peer (.+)/.exec(err.message)
+						console.debug('unavailable-peer', peerID)
 						peerOtherClients[peerID] && peerOtherClients[peerID].close()
 						peerClient._connections.delete(peerID)
-						delete peerOtherClients[peerID]						
-						// this._connections.delete(peerId)
+						delete peerOtherClients[peerID]
+					} else if (err.type === 'network') {
+						console.debug('PeerJS: network', err.message)
+						// tryReconnect()
+					} else {
+						console.error(err.type, err.message, err)
 					}
 				})
 				peerClient.on('open', (id) => {
-					peerClientInfo.connecting = false
-					peerClientInfo.connected = true
-					peerClientInfo.intervalSearchKind = setInterval(() => this.peerSearchSameKind(), 20000)
+					console.debug('PeerJS: open')
+					this.peerClient.connecting = false
+					this.peerClient.reconnectDelay = 0
 					this.peerSearchSameKind()
 				})
-				peerClient.on('disconnect', function(err) {
-					peerClientInfo.connecting = false
-					peerClientInfo.connected = false
-					clearInterval(peerClientInfo.intervalSearchKind)
-					peerClientInfo.intervalSearchKind = -1
-					peerOtherClients = {}
-					if (this.unavailableID) return
-					peerClientInfo.timeoutReconnect = setTimeout(tryReconnect, 5000)
+				peerClient.on('disconnected', async(err) => {
+					console.debug('PeerJS: disconnected')
+					this.peerClient.connecting = false
+					for (const client of Object.values(peerOtherClients)) {
+						console.debug('Testing', client.peer)
+						if (!await this.peerIsAlive(client)) {
+							console.debug('Testing', client.peer, 'not alive.')
+							client.close()
+							delete peerOtherClients[client.peer]
+						} else {
+							console.debug('Testing', client.peer, 'alive.')
+						}
+					}
+					this.peerReconnect()
 				})
-				peerClient.on('server-error', () => {
-					peerClientInfo.timeoutReconnect = setTimeout(tryReconnect, 5000)
+				peerClient.on('close', (e) => {
+					console.debug('PeerJS: close')
+					this.peerClient.connecting = false
 				})
-				peerClient.on('connection', (conn) => {
-					if (peerOtherClients[conn.peer] && peerOtherClients[conn.peer].open) conn.close()
-					conn.open = true
-					console.log('connected with (in)', conn.peer)
+				peerClient.on('call', (e) => {
+					console.debug('PeerJS: call')
+				})
+				peerClient.on('connection', async(conn) => {
+					console.debug('PeerJS: connection', conn.peer)
+					if (peerOtherClients[conn.peer] && peerOtherClients[conn.peer].open) {
+						console.debug('PeerJS: testing active connection for', conn.peer)
+						if (await this.peerIsAlive(peerOtherClients[conn.peer])) {
+							console.debug('PeerJS: connection already active for', conn.peer)
+							return
+						}
+					}
+					conn.incoming = true
 					peerOtherClients[conn.peer] = conn
 					this.peerInitConnection(conn)
 				})
 			},
-			peerClientReconnect() {
-				this.peerStatusInfo.connecting = true
-				this.peerClientInfo.timeoutReconnect = -1
-				try {
-					peerClient && peerClient.reconnect()
-				} catch (err) {
-					peerClient = this.peerCreateClient()
-					console.error(err)
-				}
-			},
 			peerInitConnection(conn) {
+				console.debug('init peer', conn.peer)
 				conn.on('data', (d) => {
-					this.peerMessage(d)
+					this.peerMessage(d, conn)
 				})
 				conn.on('error', (err) => {
-					console.log('closing connection? (error)', err)
-				})
-				conn.on('close', () => {
-					console.log('closing connection?')
-				})
-				conn.on('open', () => {
-					console.log('syncing invest?')
-					this.syncInvest(undefined, this.invests.slice(), conn)
-				})
-				if (conn._open) {
-					this.syncInvest(undefined, this.invests.slice(), conn)					
-				}
-			},
-			peerSearchSameKind() {
-				const allIds = []
-				for (let i = 1; i < 64; i++) {
-					if (i === this.peerSubclientID) continue
-					const id = this.peerID(i)
-					if (peerOtherClients[id]) continue
-					const connection = peerClient.connect(this.peerID(i))
-					peerOtherClients[id] = connection
-					connection.on('error', (err) => {
-						console.error('disconnected (error):', id)
-						delete peerOtherClients[id]
-					})
-					connection.on('open', () => {
-						connection.open = true
-						console.log('connected with (out)', id)
-						peerOtherClients[id] = connection
-						this.peerInitConnection(connection)
-					})
-					connection.on('error', (err) => {
-						console.error('disconnected (error):', id)
-						delete peerOtherClients[id]
-					})
-					connection.on('close', (err) => {
-						console.error('disconnected (close):', id)
-						delete peerOtherClients[id]
-					})
-				}
-				// Clear garbage collector
-				queueMicrotask(() => { 
-					let img = document.createElement("img");
-					img.src = window.URL.createObjectURL(new Blob([new ArrayBuffer(5e+7)])); // 50Mo or less or more depending as you wish to force/invoke GC cycle run
-					img.onerror = function() {
-						window.URL.revokeObjectURL(this.src);
-						img = null
+					console.log('closing connection? (error)', err.type, err.message)
+					if (!conn.open && peerOtherClients[conn.peer] && peerOtherClients[conn.peer].connectionId === conn.connectionId) {
+						delete peerOtherClients[conn.peer]
 					}
 				})
-
+				conn.on('close', () => {
+					if (peerOtherClients[conn.peer] && peerOtherClients[conn.peer].connectionId === conn.connectionId) {
+						delete peerOtherClients[conn.peer]
+					}
+				})
+				conn.on('open', () => {
+					console.debug('connected with', conn.peer)
+					this.syncInvest(undefined, this.invests.slice(), conn)
+				})
+			},
+			peerAttemptConnectTo(id) {
+				let connection
+				try {
+					connection = peerClient.connect(id)
+					if (!connection) {
+						console.log('no connection?', connection)
+					} else {
+						connection.peerConnection.addEventListener('signalingstatechange', (e) => {
+							// console.log(id, 'state', e.target.signalingState)
+						})
+					}
+				} catch (err) {
+					console.error(err)
+					this.peerFreeMemory()
+					return null
+				}
+				if (!connection) return null
+				connection.incoming = false
+				peerOtherClients[id] = connection
+				this.peerInitConnection(connection)
+				return connection
+			},
+			peerFreeMemory() {
+				return new Promise(resolve => {
+					queueMicrotask(() => { 
+						let img = document.createElement("img");
+						img.src = window.URL.createObjectURL(new Blob([new ArrayBuffer(5e+7)])); // 50Mo or less or more depending as you wish to force/invoke GC cycle run
+						img.onerror = function() {
+							window.URL.revokeObjectURL(this.src)
+							img = null
+						}
+						resolve()
+					})
+				})
+			},
+			async peerSearchSameKind() {
+				if (peerClient.disconnected) {
+					this.peerCreateClient()
+					return
+				}
+				let i = 0
+				for (i = 1; i < 16; i++) {
+					if (i === this.peerSubclientID) continue
+					const id = this.peerID(i)
+					if (peerOtherClients[id] && peerOtherClients[id].open) {
+						this.peerIsAlive(peerOtherClients[id]).then((alive) => {
+							if (alive) return
+							peerOtherClients[id] = this.peerAttemptConnectTo(id)
+							if (!peerOtherClients[id]) {
+								delete peerOtherClients[id]
+							}
+						})
+						continue
+					}
+					peerOtherClients[id] = this.peerAttemptConnectTo(id)
+					if (!peerOtherClients[id]) {
+						delete peerOtherClients[id]
+						break
+					}
+				}
+				console.debug('Searched for #' + i, 'clients.')
 			},
 		},
 		watch: {
 			syncKey(val) {
 				window.localStorage.setItem('syncKey', val)
 				if (val) {
+					this.peer()
+				} else {
 					if (peerClient) {
 						peerClient.disconnect()
+						peerClient = null
 					}
-					this.peerCreateClient()
 				}
 			},
 		},
@@ -753,11 +863,14 @@
 			const invests = window.localStorage.getItem('invests')
 			if (invests) {
 				const data = JSON.parse(invests)
+				let upgraded = false
 				for (const o of data) {
 					if (!o.id) {
 						o.id = window.$utils.id()
+						upgraded = true
 					}
 					this.invests.push(o)
+					if (upgraded) this.saveInvests()
 				}
 			}
 			this.intervalUpdateQuotes()
