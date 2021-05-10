@@ -15,16 +15,18 @@
 			currency: process.env.CURRENCY || 'EUR',
 			...options
 		}
-		const url = 'https://pro-api.coinmarketcap.com/v1/cryptocurrency/map?limit=5000'
+		const url = 'https://pro-api.coinmarketcap.com/v1/cryptocurrency/map'
 		if (!opts.key) {
 			throw new Error('You must precise the key.')
 		}
 		const list = []
 		let hasMore = true
+		let start = 1
 		while (hasMore) {
 			const data = await axios.get(url, {
 				params: {
-		
+					limit: 5000,
+					start,
 				},
 				headers: {
 					'X-CMC_PRO_API_KEY': opts.key,
@@ -37,6 +39,7 @@
 			for (const item of data.data) {
 				list.push(item)
 			}
+			start += 5000
 		}
 		return list
 	}
